@@ -5,7 +5,7 @@ from PIL import Image
 source_img = Image.open('source.jpg')
 sub_images_dir = 'floriasundays'
 
-scale = 2.5
+scale = 1.0
 
 cell_size = (30, 30)
 
@@ -51,6 +51,30 @@ def average_color(image):
     return mean_color
 
 
+def resize_and_crop(img, output_size):
+    # Scaling
+    width, height = img.size
+    aspect_ratio = width / height
+    if aspect_ratio > 1:  # Width > Height
+        new_width = int(output_size[0] * aspect_ratio)
+        new_height = output_size[1]
+    else:  # Width < Height
+        new_width = output_size[0]
+        new_height = int(output_size[1] / aspect_ratio)
+
+    scaled_img = img.resize((new_width, new_height))
+
+    # Cropping
+    left = (scaled_img.width - output_size[0])/2
+    top = (scaled_img.height - output_size[1])/2
+    right = (scaled_img.width + output_size[0])/2
+    bottom = (scaled_img.height + output_size[1])/2
+
+    cropped_img = scaled_img.crop((left, top, right, bottom))
+
+    return cropped_img
+
+
 # Divide the source image into regions and compute the average color of each region in OKLab space
 print('Finding OKLab coordinates of source image regions ...')
 region_coords = []
@@ -66,7 +90,7 @@ for filename in os.listdir(sub_images_dir):
     file_path = os.path.join(sub_images_dir, filename)
     if file_path.lower().endswith(('.jpg', '.jpeg')):
         img = Image.open(file_path)
-        resized_img = img.resize(tuple((np.array(cell_size) * scale).astype(int)))
+        resized_img = resize_and_crop(img, tuple((np.array(cell_size) * scale).astype(int)))
         sub_images.append(resized_img)
 
 print('Finding sub-image OKLab coordinates ...')
