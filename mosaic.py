@@ -3,8 +3,10 @@ import numpy as np
 from PIL import Image
 
 source_img = Image.open('source.jpg')
+sub_images_dir = 'floriasundays'
 
-region_size = (20, 20)
+cell_size = (30, 30)
+
 
 def rgb_to_oklab(rgb):
     # Normalize RGB values to the range [0, 1]
@@ -47,36 +49,33 @@ def average_color(image):
     return mean_color
 
 
-# Divide the source image into regions and compute the hash of each region
-print('Building hashes ...')
-region_hashes = []
-for x in range(0, source_img.width, region_size[0]):
-    for y in range(0, source_img.height, region_size[1]):
-        region = source_img.crop((x, y, x + region_size[0], y + region_size[1]))
-        region_hash = rgb_to_oklab(average_color(region))
-        region_hashes.append((x, y, region_hash))
+# Divide the source image into regions and compute the average color of each region in OKLab space
+print('Finding OKLab coordinates of source image regions ...')
+region_coords = []
+for x in range(0, source_img.width, cell_size[0]):
+    for y in range(0, source_img.height, cell_size[1]):
+        region = source_img.crop((x, y, x + cell_size[0], y + cell_size[1]))
+        region_coord = rgb_to_oklab(average_color(region))
+        region_coords.append((x, y, region_coord))
 
-print('Loading sub images ...')
+print('Loading sub images into memory ...')
 sub_images = []
-sub_images_dir = 'floriasundays'
 for filename in os.listdir(sub_images_dir):
     file_path = os.path.join(sub_images_dir, filename)
     if file_path.lower().endswith(('.jpg', '.jpeg')):
         img = Image.open(file_path)
-        resized_img = img.resize(region_size)
+        resized_img = img.resize(cell_size)
         sub_images.append(resized_img)
 
-print('Building sub hashes ...')
-sub_image_hashes = [(rgb_to_oklab(average_color(img)), img) for img in sub_images]
-hex_hashes = [str(item[0]) for item in sub_image_hashes]
-print(hex_hashes)
+print('Finding sub-image OKLab coordinates ...')
+sub_image_coords = [(rgb_to_oklab(average_color(img)), img) for img in sub_images]
 
-print('Building mosaic image ...')
+print('Finding nearest fits and building image ...')
 mosaic_image = Image.new('RGB', source_img.size)
-for x, y, region_hash in region_hashes:
-    # Find the sub image with the closest hash
-    # closest_sub_image = min(sub_image_hashes, key=lambda item: region_hash - item[0])[1]
-    closest_sub_image = min(sub_image_hashes, key=lambda item: np.linalg.norm(region_hash - item[0]))[1]
+for x, y, region_coord in region_coords:
+    # Find the sub image which is spatially closest to the region in the source image, in OKLab space.
+    # Using the Euclidean distance between source region color and sub-image color
+    closest_sub_image = min(sub_image_coords, key=lambda item: np.linalg.norm(region_coord - item[0]))[1]
     # Place the closest sub image in the mosaic
     mosaic_image.paste(closest_sub_image, (x, y))
 
