@@ -5,6 +5,8 @@ from PIL import Image
 source_img = Image.open('source.jpg')
 sub_images_dir = 'floriasundays'
 
+scale = 2.5
+
 cell_size = (30, 30)
 
 
@@ -64,19 +66,21 @@ for filename in os.listdir(sub_images_dir):
     file_path = os.path.join(sub_images_dir, filename)
     if file_path.lower().endswith(('.jpg', '.jpeg')):
         img = Image.open(file_path)
-        resized_img = img.resize(cell_size)
+        resized_img = img.resize(tuple((np.array(cell_size) * scale).astype(int)))
         sub_images.append(resized_img)
 
 print('Finding sub-image OKLab coordinates ...')
 sub_image_coords = [(rgb_to_oklab(average_color(img)), img) for img in sub_images]
 
 print('Finding nearest fits and building image ...')
-mosaic_image = Image.new('RGB', source_img.size)
+width, height = source_img.size
+scaled_size = (int(width * scale), int(height * scale))
+mosaic_image = Image.new('RGB', scaled_size)
 for x, y, region_coord in region_coords:
     # Find the sub image which is spatially closest to the region in the source image, in OKLab space.
     # Using the Euclidean distance between source region color and sub-image color
     closest_sub_image = min(sub_image_coords, key=lambda item: np.linalg.norm(region_coord - item[0]))[1]
     # Place the closest sub image in the mosaic
-    mosaic_image.paste(closest_sub_image, (x, y))
+    mosaic_image.paste(closest_sub_image, (int(x * scale), int(y * scale)))
 
 mosaic_image.show()
