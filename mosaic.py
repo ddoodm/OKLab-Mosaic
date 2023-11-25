@@ -1,13 +1,14 @@
 import os
 import numpy as np
 from PIL import Image
+from tqdm import tqdm
 
 source_img = Image.open('source.jpg')
 sub_images_dir = 'floriasundays'
 
 scale = 1.0
-
-cell_size = (30, 30)
+reuse_penalty_factor = 0.00005
+cell_size = (20, 20)
 
 
 def rgb_to_oklab(rgb):
@@ -77,16 +78,16 @@ def resize_and_crop(img, output_size):
 
 # Divide the source image into regions and compute the average color of each region in OKLab space
 print('Finding OKLab coordinates of source image regions ...')
-region_coords = []
+color_averages = []
 for x in range(0, source_img.width, cell_size[0]):
     for y in range(0, source_img.height, cell_size[1]):
         region = source_img.crop((x, y, x + cell_size[0], y + cell_size[1]))
-        region_coord = rgb_to_oklab(average_color(region))
-        region_coords.append((x, y, region_coord))
+        color_average = rgb_to_oklab(average_color(region))
+        color_averages.append((x, y, color_average))
 
 print('Loading sub images into memory ...')
 sub_images = []
-for filename in os.listdir(sub_images_dir):
+for filename in tqdm(os.listdir(sub_images_dir)):
     file_path = os.path.join(sub_images_dir, filename)
     if file_path.lower().endswith(('.jpg', '.jpeg')):
         img = Image.open(file_path)
@@ -94,16 +95,28 @@ for filename in os.listdir(sub_images_dir):
         sub_images.append(resized_img)
 
 print('Finding sub-image OKLab coordinates ...')
-sub_image_coords = [(rgb_to_oklab(average_color(img)), img) for img in sub_images]
+sub_image_colors = [(rgb_to_oklab(average_color(img)), img) for img in sub_images]
+
+# For tracking re-use
+selection_counts = {tuple(color): 0 for color, _ in sub_image_colors}
 
 print('Finding nearest fits and building image ...')
 width, height = source_img.size
 scaled_size = (int(width * scale), int(height * scale))
 mosaic_image = Image.new('RGB', scaled_size)
-for x, y, region_coord in region_coords:
+for index, (x, y, color_average) in enumerate(tqdm(color_averages)):
+    def distance_with_penalty(item):
+        color, _ = item
+        penalty = reuse_penalty_factor * selection_counts[tuple(color)]
+        return np.linalg.norm(color_average - color) + penalty
+
     # Find the sub image which is spatially closest to the region in the source image, in OKLab space.
     # Using the Euclidean distance between source region color and sub-image color
-    closest_sub_image = min(sub_image_coords, key=lambda item: np.linalg.norm(region_coord - item[0]))[1]
+    closest_color, closest_sub_image = min(sub_image_colors, key=distance_with_penalty)
+
+    # Discourage this from being selected again
+    selection_counts[tuple(closest_color)] += 1
+
     # Place the closest sub image in the mosaic
     mosaic_image.paste(closest_sub_image, (int(x * scale), int(y * scale)))
 
