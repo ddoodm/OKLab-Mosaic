@@ -11,38 +11,30 @@ reuse_penalty_factor = 0.0
 cell_size = (20, 20)
 
 
-def rgb_to_oklab(rgb):
-    # Normalize RGB values to the range [0, 1]
-    rgb = rgb / 255.0
+def rgb_to_oklab(srgb):
+    # Normalize sRGB values to the range [0, 1]
+    srgb = srgb / 255.0
 
-    # Linearize RGB values
-    rgb_linear = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
+    # Linearize sRGB values
+    rgb_linear = np.where(srgb <= 0.04045, srgb / 12.92, ((srgb + 0.055) / 1.055) ** 2.4)
 
-    # Convert linear RGB to XYZ (using D65 illuminant)
-    xyz_to_rgb_matrix = np.array([
-        [0.4124564, 0.3575761, 0.1804375],
-        [0.2126729, 0.7151522, 0.0721750],
-        [0.0193339, 0.1191920, 0.9503041]
+    # Convert linear RGB to LMS
+    rgb_to_lms_matrix = np.array([
+        [+0.4124564, +0.3575761, +0.1804375],
+        [+0.2126729, +0.7151522, +0.0721750],
+        [+0.0193339, +0.1191920, +0.9503041]
     ])
-    xyz = np.dot(rgb_linear, xyz_to_rgb_matrix.T)
+    lms = np.dot(rgb_linear, rgb_to_lms_matrix.T)
 
-    # Convert XYZ to LMS
-    xyz_to_lms_matrix = np.array([
-        [0.4002, 0.7075, -0.0808],
-        [-0.2263, 1.1653, 0.0457],
-        [0.0000, 0.0000, 0.9182]
+    # Convert LMS to OKLab
+    lms_to_oklab_matrix = np.array([
+        [+1/np.sqrt(3), 0, 0],
+        [0, +1/np.sqrt(6), 0],
+        [0, 0, +1/np.sqrt(2)]
     ])
-    lms = np.dot(xyz, xyz_to_lms_matrix.T)
+    oklab = np.dot(np.cbrt(lms), lms_to_oklab_matrix.T)
 
-    # Convert LMS to Lab
-    lms_to_lab_matrix = np.array([
-        [1/np.sqrt(3), 0, 0],
-        [0, 1/np.sqrt(6), 0],
-        [0, 0, 1/np.sqrt(2)]
-    ])
-    lab = np.dot(np.sign(lms) * np.abs(lms) ** (1/3), lms_to_lab_matrix.T)
-
-    return lab
+    return oklab
 
 
 def average_color(image):
