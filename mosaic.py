@@ -4,10 +4,10 @@ from PIL import Image
 from tqdm import tqdm
 
 source_img = Image.open('source.jpg')
-sub_images_dir = 'floriasundays'
+sub_images_dirs = ['floriasundays', 'sub_images']
 
 scale = 1.0
-reuse_penalty_factor = 0.00005
+reuse_penalty_factor = 0.0
 cell_size = (20, 20)
 
 
@@ -87,12 +87,13 @@ for x in range(0, source_img.width, cell_size[0]):
 
 print('Loading sub images into memory ...')
 sub_images = []
-for filename in tqdm(os.listdir(sub_images_dir)):
-    file_path = os.path.join(sub_images_dir, filename)
-    if file_path.lower().endswith(('.jpg', '.jpeg')):
-        img = Image.open(file_path)
-        resized_img = resize_and_crop(img, tuple((np.array(cell_size) * scale).astype(int)))
-        sub_images.append(resized_img)
+for sub_images_dir in sub_images_dirs:  # Outer loop over directories
+    for filename in tqdm(os.listdir(sub_images_dir)):  # Inner loop over files
+        file_path = os.path.join(sub_images_dir, filename)
+        if file_path.lower().endswith(('.jpg', '.jpeg')):
+            img = Image.open(file_path)
+            resized_img = resize_and_crop(img, tuple((np.array(cell_size) * scale).astype(int)))
+            sub_images.append(resized_img)
 
 print('Finding sub-image OKLab coordinates ...')
 sub_image_colors = [(rgb_to_oklab(average_color(img)), img) for img in sub_images]
