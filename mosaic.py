@@ -1,10 +1,14 @@
 import os
+import pickle
 import numpy as np
 from PIL import Image
+from pillow_heif import register_heif_opener
 from tqdm import tqdm
 
-source_img = Image.open('source.jpg')
-sub_images_dirs = ['floriasundays', 'sub_images']
+register_heif_opener()
+
+source_img = Image.open('/Volumes/Phone SSD/DCIM/100APPLE/IMG_7014.HEIC')
+sub_images_dirs = ['/Volumes/Phone SSD/DCIM/100APPLE']
 
 scale = 1.0
 reuse_penalty_factor = 0.0
@@ -77,18 +81,36 @@ for x in range(0, source_img.width, cell_size[0]):
         color_average = rgb_to_oklab(average_color(region))
         color_averages.append((x, y, color_average))
 
-print('Loading sub images into memory ...')
-sub_images = []
-for sub_images_dir in sub_images_dirs:  # Outer loop over directories
-    for filename in tqdm(os.listdir(sub_images_dir)):  # Inner loop over files
-        file_path = os.path.join(sub_images_dir, filename)
-        if file_path.lower().endswith(('.jpg', '.jpeg')):
-            img = Image.open(file_path)
-            resized_img = resize_and_crop(img, tuple((np.array(cell_size) * scale).astype(int)))
-            sub_images.append(resized_img)
+tile_size = tuple((np.array(cell_size) * scale).astype(int))
+cache_path = f'.tile_cache_{tile_size[0]}x{tile_size[1]}.pkl'
 
-print('Finding sub-image OKLab coordinates ...')
-sub_image_colors = [(rgb_to_oklab(average_color(img)), img) for img in sub_images]
+print('Loading sub images into memory ...')
+cache = pickle.load(open(cache_path, 'rb')) if os.path.exists(cache_path) else {}
+cache_dirty = False
+sub_image_colors = []
+
+for sub_images_dir in sub_images_dirs:
+    for filename in tqdm(os.listdir(sub_images_dir)):
+        file_path = os.path.join(sub_images_dir, filename)
+        if not filename.startswith('.') and file_path.lower().endswith(('.jpg', '.jpeg', '.heic', '.heif')):
+            mtime = os.path.getmtime(file_path)
+            entry = cache.get(file_path)
+            if entry and entry['mtime'] == mtime:
+                oklab_color = entry['oklab']
+                pixels = entry['pixels']
+            else:
+                img = Image.open(file_path).convert('RGB')
+                resized_img = resize_and_crop(img, tile_size)
+                pixels = np.array(resized_img)
+                oklab_color = rgb_to_oklab(average_color(resized_img))
+                cache[file_path] = {'mtime': mtime, 'oklab': oklab_color, 'pixels': pixels}
+                cache_dirty = True
+            sub_image_colors.append((oklab_color, pixels))
+
+if cache_dirty:
+    print('Saving tile cache ...')
+    with open(cache_path, 'wb') as f:
+        pickle.dump(cache, f)
 
 # For tracking re-use
 selection_counts = {tuple(color): 0 for color, _ in sub_image_colors}
@@ -111,6 +133,6 @@ for index, (x, y, color_average) in enumerate(tqdm(color_averages)):
     selection_counts[tuple(closest_color)] += 1
 
     # Place the closest sub image in the mosaic
-    mosaic_image.paste(closest_sub_image, (int(x * scale), int(y * scale)))
+    mosaic_image.paste(Image.fromarray(closest_sub_image), (int(x * scale), int(y * scale)))
 
 mosaic_image.show()
