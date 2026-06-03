@@ -123,27 +123,18 @@ if cache_dirty:
     with open(cache_path, 'wb') as f:
         pickle.dump(cache, f)
 
-# For tracking re-use
-selection_counts = {tuple(color): 0 for color, _ in sub_image_colors}
+all_colors = np.array([color for color, _ in sub_image_colors])  # (n_tiles, 3)
+all_pixels = [pixels for _, pixels in sub_image_colors]
+selection_counts = np.zeros(len(all_colors), dtype=np.float64)
 
 print('Finding nearest fits and building image ...')
 width, height = source_img.size
 scaled_size = (int(width * scale), int(height * scale))
 mosaic_image = Image.new('RGB', scaled_size)
-for index, (x, y, color_average) in enumerate(tqdm(color_averages)):
-    def distance_with_penalty(item):
-        color, _ = item
-        penalty = reuse_penalty_factor * selection_counts[tuple(color)]
-        return np.linalg.norm(color_average - color) + penalty
-
-    # Find the sub image which is spatially closest to the region in the source image, in OKLab space.
-    # Using the Euclidean distance between source region color and sub-image color
-    closest_color, closest_sub_image = min(sub_image_colors, key=distance_with_penalty)
-
-    # Discourage this from being selected again
-    selection_counts[tuple(closest_color)] += 1
-
-    # Place the closest sub image in the mosaic
-    mosaic_image.paste(Image.fromarray(closest_sub_image), (int(x * scale), int(y * scale)))
+for x, y, color_average in tqdm(color_averages):
+    distances = np.linalg.norm(all_colors - color_average, axis=1) + reuse_penalty_factor * selection_counts
+    idx = np.argmin(distances)
+    selection_counts[idx] += 1
+    mosaic_image.paste(Image.fromarray(all_pixels[idx]), (int(x * scale), int(y * scale)))
 
 mosaic_image.show()
