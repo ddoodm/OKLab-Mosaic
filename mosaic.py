@@ -1,5 +1,6 @@
 import os
 import pickle
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 from PIL import Image
 from pillow_heif import register_heif_opener
@@ -89,23 +90,33 @@ cache = pickle.load(open(cache_path, 'rb')) if os.path.exists(cache_path) else {
 cache_dirty = False
 sub_image_colors = []
 
-for sub_images_dir in sub_images_dirs:
-    for filename in tqdm(os.listdir(sub_images_dir)):
-        file_path = os.path.join(sub_images_dir, filename)
-        if not filename.startswith('.') and file_path.lower().endswith(('.jpg', '.jpeg', '.heic', '.heif')):
-            mtime = os.path.getmtime(file_path)
-            entry = cache.get(file_path)
-            if entry and entry['mtime'] == mtime:
-                oklab_color = entry['oklab']
-                pixels = entry['pixels']
-            else:
-                img = Image.open(file_path).convert('RGB')
-                resized_img = resize_and_crop(img, tile_size)
-                pixels = np.array(resized_img)
-                oklab_color = rgb_to_oklab(average_color(resized_img))
-                cache[file_path] = {'mtime': mtime, 'oklab': oklab_color, 'pixels': pixels}
-                cache_dirty = True
-            sub_image_colors.append((oklab_color, pixels))
+IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.heic', '.heif')
+file_paths = [
+    os.path.join(d, f)
+    for d in sub_images_dirs
+    for f in os.listdir(d)
+    if not f.startswith('.') and f.lower().endswith(IMAGE_EXTENSIONS)
+]
+
+def load_tile(file_path):
+    mtime = os.path.getmtime(file_path)
+    entry = cache.get(file_path)
+    if entry and entry['mtime'] == mtime:
+        return file_path, mtime, entry['oklab'], entry['pixels'], False
+    img = Image.open(file_path).convert('RGB')
+    resized_img = resize_and_crop(img, tile_size)
+    pixels = np.array(resized_img)
+    oklab_color = rgb_to_oklab(average_color(resized_img))
+    return file_path, mtime, oklab_color, pixels, True
+
+with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+    futures = {executor.submit(load_tile, fp): fp for fp in file_paths}
+    for future in tqdm(as_completed(futures), total=len(futures)):
+        file_path, mtime, oklab_color, pixels, is_new = future.result()
+        sub_image_colors.append((oklab_color, pixels))
+        if is_new:
+            cache[file_path] = {'mtime': mtime, 'oklab': oklab_color, 'pixels': pixels}
+            cache_dirty = True
 
 if cache_dirty:
     print('Saving tile cache ...')
