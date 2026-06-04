@@ -2,26 +2,44 @@ import os
 import pickle
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 from pillow_heif import register_heif_opener
 from tqdm import tqdm
 
 register_heif_opener()
 
-source_img = Image.open('/Volumes/Phone SSD/DCIM/100APPLE/IMG_7014.HEIC')
-# source_img = Image.open('IMG_7778.heic')
-# sub_images_dirs = ['/Volumes/Phone SSD/DCIM/100APPLE']
-sub_images_dirs = ['/Volumes/Phone SSD/DCIM/100APPLE', '/Volumes/Phone SSD/DCIM-Tian/100APPLE']
+# source_img = Image.open('/Volumes/Phone SSD/DCIM/100APPLE/IMG_7012.HEIC') # chimelong explosion smaller
+# source_img = Image.open('/Volumes/Phone SSD/DCIM/100APPLE/IMG_7014.HEIC') # chimelong explosion
+# source_img = Image.open('/Volumes/Phone SSD/DCIM/100APPLE/IMG_6790.HEIC') # 2nd best flowery one
+# source_img = Image.open('/Volumes/Phone SSD/DCIM/100APPLE/IMG_6791.HEIC') # another flowery one
+source_img = Image.open('/Volumes/Phone SSD/DCIM/100APPLE/IMG_6788.HEIC') # nice flowery one
+# source_img = Image.open('/Volumes/Phone SSD/DCIM/100APPLE/IMG_5563.HEIC') # on a boat
+# source_img = Image.open('/Volumes/Phone SSD/DCIM/100APPLE/IMG_6374.HEIC') # hug in tall building
+# source_img = Image.open('IMG_7778.heic') # disney hat one
+# source_img = Image.open('IMG_7713.heic') # disney ME one
+# source_img = Image.open('83.jpg') # shopping mall
+# source_img = Image.open('IMG_7397.heic') # shanghai 
+# source_img = Image.open('10.jpg') # dinner 
+# source_img = Image.open('IMG_6374-EDIT.jpg') # edited towertop
 
-scale = 1.0
+# sub_images_dirs = ['/Volumes/Phone SSD/DCIM/100APPLE']
+sub_images_dirs = [
+    '/Volumes/Phone SSD/DCIM/100APPLE',
+    '/Volumes/Phone SSD/DCIM-Tian/100APPLE',
+    '/Volumes/ILC/DCIM/101MSDCF'
+]
+
+source_img = ImageOps.exif_transpose(source_img)
+
+scale = 2.0
 cell_size = (20, 20)
 
 # Matching weights in OKLCh (cylindrical) space.
 # Increase hue_weight to lock hue matching; chroma_weight to prefer saturated tiles;
 # lower lightness_weight to let brightness vary more freely.
 lightness_weight = 1.0
-chroma_weight = 1.0
-hue_weight = 1.0
+chroma_weight = 1.5
+hue_weight = 2.0
 
 # Small noise added to distances before picking the best tile.
 # Creates dithering in regions where multiple tiles are near-equal matches.
@@ -116,7 +134,7 @@ def load_tile(file_path):
     entry = cache.get(file_path)
     if entry and entry['mtime'] == mtime:
         return file_path, mtime, entry['oklab'], entry['pixels'], False
-    img = Image.open(file_path).convert('RGB')
+    img = ImageOps.exif_transpose(Image.open(file_path)).convert('RGB')
     resized_img = resize_and_crop(img, tile_size)
     pixels = np.array(resized_img)
     oklab_color = average_oklab(resized_img)
