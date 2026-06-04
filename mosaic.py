@@ -8,8 +8,8 @@ from tqdm import tqdm
 
 register_heif_opener()
 
-# source_img = Image.open('/Volumes/Phone SSD/DCIM/100APPLE/IMG_7014.HEIC')
-source_img = Image.open('IMG_7778.heic')
+source_img = Image.open('/Volumes/Phone SSD/DCIM/100APPLE/IMG_7014.HEIC')
+# source_img = Image.open('IMG_7778.heic')
 # sub_images_dirs = ['/Volumes/Phone SSD/DCIM/100APPLE']
 sub_images_dirs = ['/Volumes/Phone SSD/DCIM/100APPLE', '/Volumes/Phone SSD/DCIM-Tian/100APPLE']
 
@@ -96,11 +96,19 @@ cache_dirty = False
 sub_image_colors = []
 
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.heic', '.heif')
+BLOCKED_IMAGES = {
+    '/Volumes/Phone SSD/DCIM/100APPLE/1239.JPG',
+    '/Volumes/Phone SSD/DCIM/100APPLE/1240.JPG',
+    '/Volumes/Phone SSD/DCIM/100APPLE/456e2229-f7ad-48fb-9e03-4f12d694e230.JPG',
+}
+
 file_paths = [
     os.path.join(d, f)
     for d in sub_images_dirs
     for f in os.listdir(d)
-    if not f.startswith('.') and f.lower().endswith(IMAGE_EXTENSIONS)
+    if not f.startswith('.')
+    and f.lower().endswith(IMAGE_EXTENSIONS)
+    and os.path.join(d, f) not in BLOCKED_IMAGES
 ]
 
 def load_tile(file_path):
