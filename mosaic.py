@@ -8,13 +8,12 @@ from tqdm import tqdm
 
 register_heif_opener()
 
-source_img = Image.open('/Volumes/Phone SSD/DCIM/100APPLE/IMG_7014.HEIC')
-# source_img = Image.open('IMG_7778.heic')
+# source_img = Image.open('/Volumes/Phone SSD/DCIM/100APPLE/IMG_7014.HEIC')
+source_img = Image.open('IMG_7778.heic')
 # sub_images_dirs = ['/Volumes/Phone SSD/DCIM/100APPLE']
 sub_images_dirs = ['/Volumes/Phone SSD/DCIM/100APPLE', '/Volumes/Phone SSD/DCIM-Tian/100APPLE']
 
 scale = 1.0
-reuse_penalty_factor = 0.0
 cell_size = (20, 20)
 
 # Matching weights in OKLCh (cylindrical) space.
@@ -23,6 +22,11 @@ cell_size = (20, 20)
 lightness_weight = 1.0
 chroma_weight = 1.0
 hue_weight = 1.0
+
+# Small noise added to distances before picking the best tile.
+# Creates dithering in regions where multiple tiles are near-equal matches.
+# Raise to increase variety; lower to always pick the single best match.
+dither_scale = 0.02
 
 
 RGB_TO_LMS = np.array([
@@ -134,8 +138,8 @@ def oklab_to_lch(lab):
 
 all_colors = np.array([color for color, _ in sub_image_colors])  # (n_tiles, 3)
 all_pixels = [pixels for _, pixels in sub_image_colors]
-selection_counts = np.zeros(len(all_colors), dtype=np.float64)
 all_lch = oklab_to_lch(all_colors)  # (n_tiles, 3): L, C, H
+rng = np.random.default_rng()
 
 print('Finding nearest fits and building image ...')
 width, height = source_img.size
@@ -150,9 +154,9 @@ for x, y, color_average in tqdm(color_averages):
     raw_dH = np.arctan2(np.sin(raw_dH), np.cos(raw_dH))
     mean_C = (all_lch[:, 1] + src_lch[1]) / 2
     dH = hue_weight * mean_C * raw_dH
-    distances = np.sqrt(dL ** 2 + dC ** 2 + dH ** 2) + reuse_penalty_factor * selection_counts
+    noise = rng.standard_normal(len(all_lch)) * dither_scale
+    distances = np.sqrt(dL ** 2 + dC ** 2 + dH ** 2) + noise
     idx = np.argmin(distances)
-    selection_counts[idx] += 1
     mosaic_image.paste(Image.fromarray(all_pixels[idx]), (int(x * scale), int(y * scale)))
 
 mosaic_image.show()
