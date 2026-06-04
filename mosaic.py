@@ -9,44 +9,45 @@ from tqdm import tqdm
 register_heif_opener()
 
 source_img = Image.open('/Volumes/Phone SSD/DCIM/100APPLE/IMG_7014.HEIC')
-sub_images_dirs = ['/Volumes/Phone SSD/DCIM/100APPLE']
+# source_img = Image.open('IMG_7778.heic')
+# sub_images_dirs = ['/Volumes/Phone SSD/DCIM/100APPLE']
+sub_images_dirs = ['/Volumes/Phone SSD/DCIM/100APPLE', '/Volumes/Phone SSD/DCIM-Tian/100APPLE']
 
 scale = 1.0
 reuse_penalty_factor = 0.0
 cell_size = (20, 20)
 
-
-def rgb_to_oklab(srgb):
-    # Normalize sRGB values to the range [0, 1]
-    srgb = srgb / 255.0
-
-    # Linearize sRGB values
-    rgb_linear = np.where(srgb <= 0.04045, srgb / 12.92, ((srgb + 0.055) / 1.055) ** 2.4)
-
-    # Convert linear RGB to LMS
-    rgb_to_lms_matrix = np.array([
-        [+0.4124564, +0.3575761, +0.1804375],
-        [+0.2126729, +0.7151522, +0.0721750],
-        [+0.0193339, +0.1191920, +0.9503041]
-    ])
-    lms = np.dot(rgb_linear, rgb_to_lms_matrix.T)
-
-    # Convert LMS to OKLab
-    lms_to_oklab_matrix = np.array([
-        [+1/np.sqrt(3), 0, 0],
-        [0, +1/np.sqrt(6), 0],
-        [0, 0, +1/np.sqrt(2)]
-    ])
-    oklab = np.dot(np.cbrt(lms), lms_to_oklab_matrix.T)
-
-    return oklab
+# Matching weights in OKLCh (cylindrical) space.
+# Increase hue_weight to lock hue matching; chroma_weight to prefer saturated tiles;
+# lower lightness_weight to let brightness vary more freely.
+lightness_weight = 1.0
+chroma_weight = 1.0
+hue_weight = 1.0
 
 
-def average_color(image):
-    # Convert image to numpy array and calculate mean color
-    data = np.array(image)
-    mean_color = data.mean(axis=(0, 1))
-    return mean_color
+RGB_TO_LMS = np.array([
+    [0.4122214708, 0.5363325363, 0.0514459929],
+    [0.2119034982, 0.6806995451, 0.1073969566],
+    [0.0883024619, 0.2817188376, 0.6299787005],
+])
+
+LMS_TO_OKLAB = np.array([
+    [0.2104542553, +0.7936177850, -0.0040720468],
+    [1.9779984951, -2.4285922050, +0.4505937099],
+    [0.0259040371, +0.7827717662, -0.8086757660],
+])
+
+
+def linear_rgb_to_oklab(rgb_linear):
+    lms = np.dot(rgb_linear, RGB_TO_LMS.T)
+    return np.dot(np.cbrt(lms), LMS_TO_OKLAB.T)
+
+
+def average_oklab(image):
+    srgb = np.array(image) / 255.0
+    # Linearize before averaging — averaging in gamma-encoded sRGB gives wrong results
+    linear = np.where(srgb <= 0.04045, srgb / 12.92, ((srgb + 0.055) / 1.055) ** 2.4)
+    return linear_rgb_to_oklab(linear.mean(axis=(0, 1)))
 
 
 def resize_and_crop(img, output_size):
@@ -79,7 +80,7 @@ color_averages = []
 for x in range(0, source_img.width, cell_size[0]):
     for y in range(0, source_img.height, cell_size[1]):
         region = source_img.crop((x, y, x + cell_size[0], y + cell_size[1]))
-        color_average = rgb_to_oklab(average_color(region))
+        color_average = average_oklab(region)
         color_averages.append((x, y, color_average))
 
 tile_size = tuple((np.array(cell_size) * scale).astype(int))
@@ -106,7 +107,7 @@ def load_tile(file_path):
     img = Image.open(file_path).convert('RGB')
     resized_img = resize_and_crop(img, tile_size)
     pixels = np.array(resized_img)
-    oklab_color = rgb_to_oklab(average_color(resized_img))
+    oklab_color = average_oklab(resized_img)
     return file_path, mtime, oklab_color, pixels, True
 
 with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
@@ -123,16 +124,33 @@ if cache_dirty:
     with open(cache_path, 'wb') as f:
         pickle.dump(cache, f)
 
+def oklab_to_lch(lab):
+    """Convert OKLab (N, 3) or (3,) array to OKLCh [L, C, H_radians]."""
+    L = lab[..., 0]
+    C = np.sqrt(lab[..., 1] ** 2 + lab[..., 2] ** 2)
+    H = np.arctan2(lab[..., 2], lab[..., 1])
+    return np.stack([L, C, H], axis=-1)
+
+
 all_colors = np.array([color for color, _ in sub_image_colors])  # (n_tiles, 3)
 all_pixels = [pixels for _, pixels in sub_image_colors]
 selection_counts = np.zeros(len(all_colors), dtype=np.float64)
+all_lch = oklab_to_lch(all_colors)  # (n_tiles, 3): L, C, H
 
 print('Finding nearest fits and building image ...')
 width, height = source_img.size
 scaled_size = (int(width * scale), int(height * scale))
 mosaic_image = Image.new('RGB', scaled_size)
 for x, y, color_average in tqdm(color_averages):
-    distances = np.linalg.norm(all_colors - color_average, axis=1) + reuse_penalty_factor * selection_counts
+    src_lch = oklab_to_lch(color_average)
+    dL = lightness_weight * (all_lch[:, 0] - src_lch[0])
+    dC = chroma_weight   * (all_lch[:, 1] - src_lch[1])
+    # Circular hue difference, scaled by mean chroma to suppress noise for neutral colours
+    raw_dH = all_lch[:, 2] - src_lch[2]
+    raw_dH = np.arctan2(np.sin(raw_dH), np.cos(raw_dH))
+    mean_C = (all_lch[:, 1] + src_lch[1]) / 2
+    dH = hue_weight * mean_C * raw_dH
+    distances = np.sqrt(dL ** 2 + dC ** 2 + dH ** 2) + reuse_penalty_factor * selection_counts
     idx = np.argmin(distances)
     selection_counts[idx] += 1
     mosaic_image.paste(Image.fromarray(all_pixels[idx]), (int(x * scale), int(y * scale)))
